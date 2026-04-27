@@ -26,7 +26,6 @@ from monai.transforms import (
     EnsureTyped,
     RandCropByPosNegLabeld,
     RandFlipd,
-    SpatialPadd,
 )
 from monai.visualize import plot_2d_or_3d_image
 from monai.transforms import Transform,MapTransform
@@ -87,8 +86,7 @@ def main(tempdir):
             mode=("bilinear", "nearest"),
         ),
         CTNormalizationd(keys=['image'],intensity_properties={'mean':48.13441467285156,'std':13.457549095153809,'percentile_00_5':11.99969482421875,'percentile_99_5':79.0}),
-        SpatialPadd(keys=["image", "label"], spatial_size=(512, 512, 32), method="symmetric"),
-        RandCropByPosNegLabeld(keys=['image', 'label'],label_key='label',spatial_size =(128,128,32), pos=1,neg=1,num_samples=2,image_key='image',image_threshold=0),
+        RandCropByPosNegLabeld(keys=['image', 'label'],label_key='label',spatial_size =(256,256,16), pos=1,neg=1,num_samples=4,image_key='image',image_threshold=0),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=0),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=1),
         RandFlipd(keys=["image", "label"], prob=0.5, spatial_axis=2),
@@ -191,11 +189,11 @@ def main(tempdir):
     post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
     # create UNet, DiceLoss and Adam optimizer
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = monai.networks.nets.SwinUNETR(
-        img_size=(128,128,32),
+    model = monai.networks.nets.SegResNet(
+        spatial_dims=3,
         in_channels=1,
-        out_channels=1, 
-        feature_size=48,
+        out_channels=1,
+        dropout_prob=0.2
     ).to(device)
     loss_function = monai.losses.DiceLoss(sigmoid=True)
     optimizer = torch.optim.AdamW(model.parameters(),lr=0.01,weight_decay=0.01)
@@ -208,7 +206,7 @@ def main(tempdir):
     best_metric_epoch = -1
     epoch_loss_values = list()
     metric_values = list()
-    writer = SummaryWriter('runs/SwinUNETR')
+    writer = SummaryWriter('runs/SegResNet')
     for epoch in range(200):
         print("-" * 10)
         print(f"epoch {epoch + 1}/{200}")
@@ -248,8 +246,8 @@ def main(tempdir):
                 for val_data in val_loader:
                     val_step += 1
                     val_images, val_labels = val_data['image'].to(device), val_data['label'].to(device)
-                    roi_size = (128,128,32)
-                    sw_batch_size = 4
+                    roi_size = (256,256,16)
+                    sw_batch_size = 8
                     val_outputs = sliding_window_inference(val_images, roi_size, sw_batch_size, model)
                     #val_epoch_len = len(val_check_ds)
                     val_loss = loss_function(val_outputs, val_labels)
@@ -267,7 +265,7 @@ def main(tempdir):
                 if metric > best_metric:
                     best_metric = metric
                     best_metric_epoch = epoch + 1
-                    torch.save(model.state_dict(), "SwinUNETR_best_metric_model_segmentation3d_array.pth")
+                    torch.save(model.state_dict(), "SegResNet_best_metric_model_segmentation3d_array.pth")
                     print("saved new best metric model")
                 print(
                     "current epoch: {} current mean dice: {:.4f} best mean dice: {:.4f} at epoch {}".format(
